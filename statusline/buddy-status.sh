@@ -14,6 +14,51 @@
 # so the buddy doesn't show up twice (once in status line, once in wrapper panel).
 [ "$BUDDY_SHELL" = "1" ] && exit 0
 
+# ─── Basic info line (model · ctx · usage · cost) ───────────────────────────────
+# The upstream buddy discards stdin; we capture the Claude Code status JSON here
+# so the user's basic info stays visible (printed first, companion below).
+input=$(cat)
+_bj() { printf '%s' "$input" | jq -r "$1" 2>/dev/null; }
+_D=$'\033[2m'; _R=$'\033[0m'; _BO=$'\033[1m'; _CY=$'\033[36m'
+_GR=$'\033[32m'; _YE=$'\033[33m'; _RE=$'\033[31m'; _SE="${_D}│${_R}"
+_pc() { if [ "${1:-0}" -ge 80 ]; then printf '%s' "$_RE"; elif [ "${1:-0}" -ge 50 ]; then printf '%s' "$_YE"; else printf '%s' "$_GR"; fi; }
+_reset() { # $1 = target epoch -> "2h54m" / "2d23h" / "now"
+  local now delta d h m; now=$(date +%s); delta=$(( $1 - now ))
+  [ "$delta" -le 0 ] && { printf 'now'; return; }
+  d=$(( delta/86400 )); h=$(( (delta%86400)/3600 )); m=$(( (delta%3600)/60 ))
+  if   [ "$d" -gt 0 ]; then printf '%dd%dh' "$d" "$h"
+  elif [ "$h" -gt 0 ]; then printf '%dh%dm' "$h" "$m"
+  else printf '%dm' "$m"; fi
+}
+_M=$(_bj '.model.display_name'); _M=${_M/ (1M context)/ ·1M}; [ -z "$_M" ] && _M='?'
+_EF=$(_bj '.effort.level // empty')
+_CT=$(_bj '.context_window.used_percentage // empty')
+_H5=$(_bj '.rate_limits.five_hour.used_percentage // empty')
+_H5R=$(_bj '.rate_limits.five_hour.resets_at // empty')
+_D7=$(_bj '.rate_limits.seven_day.used_percentage // empty')
+_D7R=$(_bj '.rate_limits.seven_day.resets_at // empty')
+_CO=$(_bj '.cost.total_cost_usd // 0')
+# mood dot (the round indicator on the far left), colored by ctx / usage
+_ci0=$(printf '%.0f' "${_CT:-0}" 2>/dev/null); _h0=$(printf '%.0f' "${_H5:-0}" 2>/dev/null); _d0=$(printf '%.0f' "${_D7:-0}" 2>/dev/null)
+if   [ "${_ci0:-0}" -ge 85 ] || [ "${_h0:-0}" -ge 90 ] || [ "${_d0:-0}" -ge 90 ]; then _dc="$_RE"
+elif [ "${_ci0:-0}" -le 25 ] && [ "${_h0:-0}" -lt 40 ]; then _dc="$_GR"
+else _dc="$_YE"; fi
+_info="${_dc}●${_R}  ${_SE}  ${_BO}${_CY}${_M}${_R}"
+[ -n "$_EF" ] && _info="$_info ${_D}·${_R} ${_EF}"
+[ -n "$_CT" ] && { _c=$(printf '%.0f' "$_CT"); _info="$_info ${_D}·${_R} $(_pc "$_c")ctx ${_c}%${_R}"; }
+_info="$_info ${_SE} "
+if [ -n "$_H5" ]; then
+  _h=$(printf '%.0f' "$_H5"); _info="$_info$(_pc "$_h")5h ${_h}%${_R}"
+  [ -n "$_H5R" ] && _info="$_info ${_D}$(_reset "$_H5R")${_R}"
+else _info="$_info${_D}5h —${_R}"; fi
+_info="$_info ${_D}·${_R} "
+if [ -n "$_D7" ]; then
+  _d=$(printf '%.0f' "$_D7"); _info="$_info$(_pc "$_d")wk ${_d}%${_R}"
+  [ -n "$_D7R" ] && _info="$_info ${_D}$(_reset "$_D7R")${_R}"
+else _info="$_info${_D}wk —${_R}"; fi
+_info="$_info ${_SE} $(printf '%b$%.2f%b' "$_D" "$_CO" "$_R")"
+printf '%b\n' "$_info"
+
 # shellcheck source=../scripts/paths.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../scripts/paths.sh"
 
@@ -38,7 +83,7 @@ ACHIEVEMENT=$(jq -r '.achievement // ""' "$STATE" 2>/dev/null)
 LEVEL=$(jq -r '.level // 1' "$STATE" 2>/dev/null)
 MOOD=$(jq -r '.mood // "focused"' "$STATE" 2>/dev/null)
 
-cat > /dev/null  # drain stdin
+:  # stdin already captured at top (for the basic info line)
 
 # ─── Animation: pick current frame from server-rendered frames ──────────────
 NOW=${BUDDY_FAKE_NOW:-$(date +%s)}
